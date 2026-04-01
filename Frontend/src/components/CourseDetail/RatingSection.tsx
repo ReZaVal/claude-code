@@ -11,31 +11,6 @@ import { StarRating } from '@/components/StarRating/StarRating';
 import { ratingsApi, ApiError } from '@/services/ratingsApi';
 import styles from './RatingSection.module.scss';
 
-// ── Mock data (temporal, sin backend) ────────────────────────────────────────
-const USE_MOCK_DATA = true;
-
-const MOCK_RATINGS: Record<number, { userRating: number; averageRating: number; totalRatings: number }> = {
-  1: { userRating: 4, averageRating: 4.3, totalRatings: 128 },
-  2: { userRating: 0, averageRating: 3.7, totalRatings: 54 },
-  3: { userRating: 5, averageRating: 4.8, totalRatings: 312 },
-};
-
-function getMockData(courseId: number) {
-  return MOCK_RATINGS[courseId] ?? { userRating: 0, averageRating: 0, totalRatings: 0 };
-}
-
-function simulateApiDelay(ms = 600): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-// ─────────────────────────────────────────────────────────────────────────────
-
-interface RatingSectionProps {
-  courseId: number;
-  initialAverageRating?: number;
-  initialTotalRatings?: number;
-  userId: number; // TODO: Reemplazar con userId real de auth
-}
-
 /**
  * Calcula el nuevo promedio localmente para optimistic updates
  */
@@ -54,33 +29,50 @@ function calculateOptimisticAverage(
   return Math.round((sum / currentTotal) * 10) / 10;
 }
 
+interface RatingSectionProps {
+  courseId: number;
+  initialAverageRating?: number;
+  initialTotalRatings?: number;
+}
+
 export const RatingSection = ({
   courseId,
   initialAverageRating = 0,
   initialTotalRatings = 0,
-  userId,
 }: RatingSectionProps) => {
-  const mockInitial = USE_MOCK_DATA ? getMockData(courseId) : null;
+  const [userId, setUserId] = useState<number | null>(null);
   const [userRating, setUserRating] = useState(0);
-  const [averageRating, setAverageRating] = useState(mockInitial?.averageRating ?? initialAverageRating);
-  const [totalRatings, setTotalRatings] = useState(mockInitial?.totalRatings ?? initialTotalRatings);
+  const [averageRating, setAverageRating] = useState(initialAverageRating);
+  const [totalRatings, setTotalRatings] = useState(initialTotalRatings);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
+  // Generar o recuperar userId anónimo desde localStorage
+  useEffect(() => {
+    try {
+      const KEY = 'platziflix_user_id';
+      let uuid = localStorage.getItem(KEY);
+      if (!uuid) {
+        uuid = crypto.randomUUID();
+        localStorage.setItem(KEY, uuid);
+      }
+      const id = parseInt(uuid.replace(/-/g, '').slice(0, 8), 16) % 2147483647 || 1;
+      setUserId(id);
+    } catch {
+      // localStorage no disponible: generar en memoria sin persistir
+      const uuid = crypto.randomUUID();
+      setUserId(parseInt(uuid.replace(/-/g, '').slice(0, 8), 16) % 2147483647 || 1);
+    }
+  }, []);
+
   // Cargar rating existente del usuario al montar
   useEffect(() => {
-    const loadUserRating = async () => {
-      if (USE_MOCK_DATA) {
-        await simulateApiDelay(300);
-        const mock = getMockData(courseId);
-        if (mock.userRating > 0) setUserRating(mock.userRating);
-        return;
-      }
+    if (userId === null) return;
 
+    const loadUserRating = async () => {
       try {
-        const ratings = await ratingsApi.getCourseRatings(courseId);
-        const userRatingData = ratings.find((r) => r.user_id === userId);
+        const userRatingData = await ratingsApi.getUserRating(courseId, userId);
         if (userRatingData) {
           setUserRating(userRatingData.rating);
         }
@@ -93,6 +85,8 @@ export const RatingSection = ({
   }, [courseId, userId]);
 
   const handleRatingChange = async (newRating: number) => {
+    if (userId === null) return;
+
     const previousRating = userRating;
     const previousAverage = averageRating;
     const previousTotal = totalRatings;
@@ -114,21 +108,7 @@ export const RatingSection = ({
     if (isNewRating) setTotalRatings(previousTotal + 1);
 
     try {
-      if (USE_MOCK_DATA) {
-        await simulateApiDelay(600);
-        // Actualizar mock en memoria para consistencia dentro de la sesión
-        const mock = getMockData(courseId);
-        MOCK_RATINGS[courseId] = {
-          ...mock,
-          userRating: newRating,
-          averageRating: newAverage,
-          totalRatings: isNewRating ? previousTotal + 1 : previousTotal,
-        };
-      } else if (isNewRating) {
-        await ratingsApi.createRating(courseId, { user_id: userId, rating: newRating });
-      } else {
-        await ratingsApi.updateRating(courseId, userId, { user_id: userId, rating: newRating });
-      }
+      await ratingsApi.createRating(courseId, { user_id: userId, rating: newRating });
 
       setSuccessMessage('Rating guardado exitosamente');
       setTimeout(() => setSuccessMessage(null), 3000);

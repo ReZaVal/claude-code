@@ -34,7 +34,6 @@ export const CourseDetailComponent: FC<CourseDetailComponentProps> = ({ course }
         courseId={course.id}
         initialAverageRating={course.average_rating}
         initialTotalRatings={course.total_ratings}
-        userId={1} // TODO: Reemplazar con userId real de auth
       />
 
       <div className={styles.classesSection}>
